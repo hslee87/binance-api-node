@@ -6,13 +6,15 @@ import JSONbig from 'json-bigint'
 import 'isomorphic-fetch'
 
 const BASE = 'https://api.binance.com'
-const FUTURES = 'https://fapi.binance.com'
+const FUTURES = 'https://fapi.binance.com'      // USD-M Futures
+const CFUTURES = 'https://dapi.binance.com'     // COIN-M Futures
 
 const defaultGetTime = () => Date.now()
 
 const info = {
   spot: {},
   futures: {},
+  cfutures: {}
 }
 
 /**
@@ -114,13 +116,21 @@ const checkParams = (name, payload, requires = []) => {
  * @returns {object} The api response
  */
 const publicCall = ({ proxy, endpoints }) => (path, data, method = 'GET', headers = {}) => {
+
+  // TODO: /futures path is same of USD-M, COIN-M
+  let endUrl;
+
+  if (path.includes('/fapi') || path.includes('/futures')) endUrl = endpoints.futures
+  else if (path.includes('/dapi')) endUrl = endpoints.cfutures
+  else if (path.includes('/cfutures')) {
+    endUrl = endpoints.cfutures
+    path = path.replace('/cfutures', '/futures')
+  }
+  else endUrl = endpoints.base
+
   return sendResult(
     fetch(
-      `${
-        !(path.includes('/fapi') || path.includes('/futures')) || path.includes('/sapi')
-          ? endpoints.base
-          : endpoints.futures
-      }${path}${makeQueryString(data)}`,
+      `${endUrl}${path}${makeQueryString(data)}`,
       {
         method,
         json: true,
@@ -185,13 +195,19 @@ const privateCall = ({
 
     const newData = noExtra ? data : { ...data, timestamp, signature }
 
+    let endUrl;
+
+    if (path.includes('/fapi') || path.includes('/futures')) endUrl = endpoints.futures
+    else if (path.includes('/dapi')) endUrl = endpoints.cfutures
+    else if (path.includes('/cfutures')) {
+      endUrl = endpoints.cfutures
+      path = path.replace('/cfutures', '/futures')
+    }
+    else endUrl = endpoints.base
+
     return sendResult(
       fetch(
-        `${
-          !(path.includes('/fapi') || path.includes('/futures')) || path.includes('/sapi')
-            ? endpoints.base
-            : endpoints.futures
-        }${path}${noData ? '' : makeQueryString(newData)}`,
+        `${endUrl}${path}${noData ? '' : makeQueryString(newData)}`,
         {
           method,
           headers: { 'X-MBX-APIKEY': apiKey },
@@ -300,6 +316,7 @@ export default opts => {
   const endpoints = {
     base: (opts && opts.httpBase) || BASE,
     futures: (opts && opts.httpFutures) || FUTURES,
+    cfutures: (opts && opts.httpCoinFutures) || CFUTURES,
   }
 
   const pubCall = publicCall({ ...opts, endpoints })
@@ -417,6 +434,7 @@ export default opts => {
       privCall('/sapi/v1/margin/isolated/account', payload, 'DELETE'),
     enableMarginAccount: payload => privCall('/sapi/v1/margin/isolated/account', payload, 'POST'),
 
+    // USD-M Futures
     futuresPing: () => pubCall('/fapi/v1/ping').then(() => true),
     futuresTime: () => pubCall('/fapi/v1/time').then(r => r.serverTime),
     futuresExchangeInfo: () => pubCall('/fapi/v1/exchangeInfo'),
@@ -424,7 +442,11 @@ export default opts => {
     futuresAggTrades: payload => aggTrades(pubCall, payload, '/fapi/v1/aggTrades'),
     futuresMarkPrice: payload => pubCall('/fapi/v1/premiumIndex', payload),
     futuresAllForceOrders: payload => pubCall('/fapi/v1/allForceOrders', payload),
+    futuresOpenInterestHist: payload => pubCall('/futures/data/openInterestHist', payload),
+    futuresTopLongShortAccountRatio: payload => pubCall('/futures/data/topLongShortAccountRatio', payload),
+    futuresTopLongShortPositionRatio: payload => pubCall('/futures/data/topLongShortPositionRatio', payload),
     futuresLongShortRatio: payload => pubCall('/futures/data/globalLongShortAccountRatio', payload),
+    futuresTakerLongShortRatio: payload => pubCall('/futures/data/takerlongshortRatio', payload),
     futuresCandles: payload => candles(pubCall, payload, '/fapi/v1/klines'),
     futuresMarkPriceCandles: payload => candles(pubCall, payload, '/fapi/v1/markPriceKlines'),
     futuresIndexPriceCandles: payload => candles(pubCall, payload, '/fapi/v1/indexPriceKlines'),
@@ -463,6 +485,59 @@ export default opts => {
     futuresIncome: payload => privCall('/fapi/v1/income', payload),
     getMultiAssetsMargin: payload => privCall('/fapi/v1/multiAssetsMargin', payload),
     setMultiAssetsMargin: payload => privCall('/fapi/v1/multiAssetsMargin', payload, 'POST'),
+
+    // COIN-M Futures
+    cfuturesPing: () => pubCall('/dapi/v1/ping').then(() => true),
+    cfuturesTime: () => pubCall('/dapi/v1/time').then(r => r.serverTime),
+    cfuturesExchangeInfo: () => pubCall('/dapi/v1/exchangeInfo'),
+    cfuturesBook: payload => book(pubCall, payload, '/dapi/v1/depth'),
+    cfuturesAggTrades: payload => aggTrades(pubCall, payload, '/dapi/v1/aggTrades'),
+    cfuturesMarkPrice: payload => pubCall('/dapi/v1/premiumIndex', payload),
+    // mfuturesAllForceOrders: payload => pubCall('/dapi/v1/allForceOrders', payload),    // 2021-04-27 : no longer supported
+    // '/futures/...' path is set to '/cfutures/...' to distinguish it from USD-M Futures
+    cfuturesOpenInterestHist: payload => pubCall('/cfutures/data/openInterestHist', payload),
+    cfuturesTopLongShortAccountRatio: payload => pubCall('/cfutures/data/topLongShortAccountRatio', payload),
+    cfuturesTopLongShortPositionRatio: payload => pubCall('/cfutures/data/topLongShortPositionRatio', payload),
+    cfuturesLongShortRatio: payload => pubCall('/cfutures/data/globalLongShortAccountRatio', payload),
+    cfuturesTakerBuySellVol: payload => pubCall('/cfutures/data/takerBuySellVol', payload),
+    cfuturesBasis: payload => pubCall('/cfutures/data/basis', payload),
+    cfuturesCandles: payload => candles(pubCall, payload, '/dapi/v1/klines'),
+    cfuturesMarkPriceCandles: payload => candles(pubCall, payload, '/dapi/v1/markPriceKlines'),
+    cfuturesIndexPriceCandles: payload => candles(pubCall, payload, '/dapi/v1/indexPriceKlines'),
+    cfuturesTrades: payload =>
+      checkParams('trades', payload, ['symbol']) && pubCall('/dapi/v1/trades', payload),
+    cfuturesDailyStats: payload => pubCall('/dapi/v1/ticker/24hr', payload),
+    cfuturesPrices: () =>
+      pubCall('/dapi/v1/ticker/price').then(r =>
+        (Array.isArray(r) ? r : [r]).reduce((out, cur) => ((out[cur.symbol] = cur.price), out), {}),
+      ),
+    cfuturesAllBookTickers: () =>
+      pubCall('/dapi/v1/ticker/bookTicker').then(r =>
+        (Array.isArray(r) ? r : [r]).reduce((out, cur) => ((out[cur.symbol] = cur), out), {}),
+      ),
+    cfuturesFundingRate: payload =>
+      checkParams('fundingRate', payload, ['symbol']) && pubCall('/dapi/v1/fundingRate', payload),
+
+    cfuturesOrder: payload => order(privCall, payload, '/dapi/v1/order'),
+    cfuturesBatchOrders: payload => privCall('/dapi/v1/batchOrders', payload, 'POST'),
+    cfuturesGetOrder: payload => privCall('/dapi/v1/order', payload),
+    cfuturesCancelOrder: payload => privCall('/dapi/v1/order', payload, 'DELETE'),
+    cfuturesCancelAllOpenOrders: payload => privCall('/dapi/v1/allOpenOrders', payload, 'DELETE'),
+    cfuturesOpenOrders: payload => privCall('/dapi/v1/openOrders', payload),
+    cfuturesAllOrders: payload => privCall('/dapi/v1/allOrders', payload),
+    cfuturesPositionRisk: payload => privCall('/dapi/v2/positionRisk', payload),
+    cfuturesLeverageBracket: payload => privCall('/dapi/v1/leverageBracket', payload),
+    cfuturesAccountBalance: payload => privCall('/dapi/v2/balance', payload),
+    cfuturesAccountInfo: payload => privCall('/dapi/v2/account', payload),
+    cfuturesUserTrades: payload => privCall('/dapi/v1/userTrades', payload),
+    cfuturesPositionMode: payload => privCall('/dapi/v1/positionSide/dual', payload),
+    cfuturesPositionModeChange: payload => privCall('/dapi/v1/positionSide/dual', payload, 'POST'),
+    cfuturesLeverage: payload => privCall('/dapi/v1/leverage', payload, 'POST'),
+    cfuturesMarginType: payload => privCall('/dapi/v1/marginType', payload, 'POST'),
+    cfuturesPositionMargin: payload => privCall('/dapi/v1/positionMargin', payload, 'POST'),
+    cfuturesMarginHistory: payload => privCall('/dapi/v1/positionMargin/history', payload),
+    cfuturesIncome: payload => privCall('/dapi/v1/income', payload),
+
     lendingAccount: payload => privCall('/sapi/v1/lending/union/account', payload),
     fundingWallet: payload => privCall('/sapi/v1/asset/get-funding-asset', payload, 'POST'),
     apiPermission: payload => privCall('/sapi/v1/account/apiRestrictions', payload),
